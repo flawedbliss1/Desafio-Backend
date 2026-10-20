@@ -102,23 +102,33 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_json"})
 			return
 		}
+
 		parsedPlayer, err := uuid.Parse(req.PlayerID)
 		if err != nil {
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_player_id"})
 			return
 		}
+
 		currency := req.InitialBalance.Currency
 		if currency != "BRL" {
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]string{"error": "unsupported_currency"})
 			return
 		}
-		if req.InitialBalance.Amount != "0.00" {
+
+		initialCents, err := parseAmountCents(req.InitialBalance.Amount)
+		if err != nil {
+			w.WriteHeader(400)
+			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_amount"})
+			return
+		}
+		if initialCents != 0 {
 			w.WriteHeader(400)
 			json.NewEncoder(w).Encode(map[string]string{"error": "unsupported_initial_balance"})
 			return
 		}
+
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		wallet, err := createWallet(ctx, pool, parsedPlayer.String(), currency)
 		cancel()
