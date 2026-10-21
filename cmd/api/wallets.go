@@ -51,16 +51,57 @@ func findWallet(ctx context.Context, pool *pgxpool.Pool, walletID string) (Walle
 	return wallet, nil
 }
 
-func createWallet(ctx context.Context, pool *pgxpool.Pool, playerID string, currency string) (Wallet, error) {
+func createWallet(ctx context.Context, pool *pgxpool.Pool, playerID string, currency string, initialCents int64) (Wallet, error) {
 	var wallets Wallet
-	query := "INSERT INTO wallets (player_id, currency) VALUES ($1, $2) RETURNING id::text, player_id::text, currency, balance_cents, version"
-	err := pool.QueryRow(ctx, query, playerID, currency).Scan(
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return Wallet{}, err
+	}
+	defer tx.Rollback(ctx)
+	query := "INSERT INTO wallets (player_id, currency, balance_cents) VALUES ($1, $2, $3) RETURNING id::text, player_id::text, currency, balance_cents, version"
+	err = tx.QueryRow(ctx, query, playerID, currency, initialCents).Scan(
 		&wallets.ID,
 		&wallets.PlayerID,
 		&wallets.Currency,
 		&wallets.BalanceCents,
 		&wallets.Version,
 	)
+	if err != nil {
+		return Wallet{}, err
+	}
+	if initialCents > 0 {
+		var transactionID string
+		query = "INSERT INTO wager_transactions (wallet_id, player_id, kind, currency, amount_cents, state) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id::text "
+		err = tx.QueryRow(
+			ctx,
+			query,
+			wallets.ID,
+			wallets.PlayerID,
+			"OPENING",
+			wallets.Currency,
+			initialCents,
+			"PROCESSED",
+		).Scan(&transactionID)
+		if err != nil {
+			return Wallet{}, err
+		}
+		query = "INSERT INTO wallet_ledger_entries (wallet_id, transaction_id, direction, currency, amount_cents, balance_before_cents, balance_after_cents) VALUES ($1, $2, $3, $4, $5, $6, $7)"
+		_, err = tx.Exec(
+			ctx,
+			query,
+			wallets.ID,
+			transactionID,
+			"CREDIT",
+			wallets.Currency,
+			initialCents,
+			0,
+			wallets.BalanceCents,
+		)
+		if err != nil {
+			return Wallet{}, err
+		}
+	}
+	err = tx.Commit(ctx)
 	if err != nil {
 		return Wallet{}, err
 	}

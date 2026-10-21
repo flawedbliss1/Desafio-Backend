@@ -22,6 +22,22 @@ func route(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	authConfig := AuthConfig{
+		Endpoint:         "http://localhost:8081/realms/jungle/protocol/openid-connect/token/introspect",
+		Issuer:           "http://localhost:8081/realms/jungle",
+		ClientID:         "jungle-api",
+		ClientSecret:     os.Getenv("JUNGLE_API_CLIENT_SECRET"),
+		InternalClientID: "servico-interno",
+	}
+
+	if authConfig.ClientSecret == "" {
+		log.Fatal("SECRET não definido")
+	}
+
+	httpClient := &http.Client{
+		Timeout: 3 * time.Second,
+	}
+
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
 		log.Fatal("Database vazia")
@@ -56,7 +72,7 @@ func main() {
 		}
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /wallets/{walletId}", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /wallets/{walletId}", requireWalletRole(httpClient, authConfig, "wallet:read", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		walletId := r.PathValue("walletId")
 		parsedID, err := uuid.Parse(walletId)
@@ -91,9 +107,9 @@ func main() {
 				"currency": wallet.Currency,
 			},
 		})
-	})
+	}))
 
-	mux.HandleFunc("POST /wallets", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /wallets", requireWalletRole(httpClient, authConfig, "wallet:write", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		var req CreateWalletRequest
 		err := json.NewDecoder(r.Body).Decode(&req)
@@ -123,19 +139,13 @@ func main() {
 			json.NewEncoder(w).Encode(map[string]string{"error": "invalid_amount"})
 			return
 		}
-		if initialCents != 0 {
-			w.WriteHeader(400)
-			json.NewEncoder(w).Encode(map[string]string{"error": "unsupported_initial_balance"})
-			return
-		}
-
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		wallet, err := createWallet(ctx, pool, parsedPlayer.String(), currency)
+		wallet, err := createWallet(ctx, pool, parsedPlayer.String(), currency, initialCents)
 		cancel()
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) {
-				log.Println(pgErr.Code, pgErr.ConstraintName)
+				log.Println(pgErr.Code, pgErr.Message)
 				if pgErr.Code == "23505" && pgErr.ConstraintName == "wallets_player_id_currency_key" {
 					w.WriteHeader(409)
 					json.NewEncoder(w).Encode(map[string]string{"error": "wallet_already_exists"})
@@ -159,7 +169,7 @@ func main() {
 				"currency": wallet.Currency,
 			},
 		})
-	})
+	}))
 
 	server := &http.Server{
 		Addr:    "127.0.0.1:8080",

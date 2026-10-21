@@ -7,3 +7,17 @@ services:
       POSTGRES_DB: jungle
     ports: 
       - "127.0.0.1:5433:5432"
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ["start-dev"]
+    environment: 
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin_local
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes: 
+      - keycloak_data:/opt/keycloak/data
+    mem_limit: 1g
+
+volumes: 
+  keycloak_data: 
