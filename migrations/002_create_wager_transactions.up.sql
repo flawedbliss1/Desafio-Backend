@@ -8,4 +8,4 @@ CREATE TABLE wager_transactions (
     state TEXT NOT NULL CHECK (state IN ('PENDING', 'PROCESSED', 'REJECTED', 'FAILED')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)
+);
