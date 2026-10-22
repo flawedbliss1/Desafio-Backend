@@ -138,5 +138,6 @@ func newMux(
 		})
 	}))
 
+	registerWagerRoutes(mux, pool, httpClient, authConfig)
 	return mux
 }

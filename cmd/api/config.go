@@ -15,6 +15,9 @@ func NewAuthConfig() (AuthConfig, error) {
 		ClientID:         "jungle-api",
 		ClientSecret:     os.Getenv("JUNGLE_API_CLIENT_SECRET"),
 		InternalClientID: "servico-interno",
+		ProviderClients: map[string]string{
+			"provider-a": "provider-a",
+		},
 	}
 
 	if authConfig.ClientSecret == "" {

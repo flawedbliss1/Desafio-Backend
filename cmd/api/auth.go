@@ -27,6 +27,7 @@ type AuthConfig struct {
 	ClientID         string
 	ClientSecret     string
 	InternalClientID string
+	ProviderClients  map[string]string
 }
 
 func introspectToken(
@@ -126,5 +127,83 @@ func requireWalletRole(
 		}
 		next(w, r)
 
+	}
+}
+
+func requireProviderRole(
+	client *http.Client,
+	config AuthConfig,
+	requiredRole string,
+	next func(w http.ResponseWriter, r *http.Request, providerID string),
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
+		authorization := r.Header.Get("Authorization")
+		parts := strings.Fields(authorization)
+
+		if len(parts) != 2 ||
+			!strings.EqualFold(parts[0], "Bearer") {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(
+				map[string]string{"error": "unauthorized"},
+			)
+			return
+		}
+
+		info, err := introspectToken(
+			r.Context(),
+			client,
+			config.Endpoint,
+			config.ClientID,
+			config.ClientSecret,
+			parts[1],
+		)
+		if err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			json.NewEncoder(w).Encode(
+				map[string]string{"error": "auth_unavailable"},
+			)
+			return
+		}
+
+		if !info.Active || info.Issuer != config.Issuer {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(
+				map[string]string{"error": "unauthorized"},
+			)
+			return
+		}
+
+		providerID, allowed := config.ProviderClients[info.ClientID]
+		if !allowed || providerID == "" {
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(
+				map[string]string{"error": "forbidden"},
+			)
+			return
+		}
+
+		roles := info.ResourceAccess[info.ClientID].Roles
+		hasRole := false
+
+		for _, role := range roles {
+			if role == requiredRole {
+				hasRole = true
+				break
+			}
+		}
+
+		if !hasRole {
+			w.WriteHeader(http.StatusForbidden)
+			json.NewEncoder(w).Encode(
+				map[string]string{"error": "forbidden"},
+			)
+			return
+		}
+
+		next(w, r, providerID)
 	}
 }
